@@ -1,0 +1,55 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile document containing authentication metadata",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" }
+      },
+      "required": ["uid"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Purchased order documentation with status tracking and review state",
+      "type": "object",
+      "properties": {
+        "customerUid": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "preparing", "ready", "shipped", "transit", "delivered", "completed", "cancelled", "return_requested", "returned"] },
+        "reviewed": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerUid", "status"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Completed user feedback with numeric rating and custom comments",
+      "type": "object",
+      "properties": {
+        "customerUid": { "type": "string" },
+        "orderId": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerUid", "orderId", "rating"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Individual user preferences and account states"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Active purchase transactions and order statuses"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Customer-submitted ratings and reviews for products/orders"
+    }
+  }
+}

@@ -1,0 +1,213 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==========================================
+    // CORES AND SECURITY HELPERS
+    // ==========================================
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'acherie812@gmail.com' ||
+        request.auth.token.admin == true ||
+        getUserData().role == 'admin'
+      );
+    }
+    
+    function isSupplier() {
+      return isSignedIn() && (
+        getUserData().role == 'supplier' || 
+        getUserData().role == 'fournisseur'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Default catch-all deny rule
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // ==========================================
+    // 1. USER PROFILES (users)
+    // ==========================================
+    match /users/{userId} {
+      // Split get and list perfectly to protect client PII
+      // Clients can get specific supplier profiles for detail pages, 
+      // but listing the entire collection is restricted to admins of O'CHAP.
+      allow get: if isSignedIn() && (
+        request.auth.uid == userId ||
+        resource.data.role == 'supplier' ||
+        resource.data.role == 'fournisseur' ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && isAdmin();
+      
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      
+      // Identity Consistency Invariant: users can't change their own roles
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        (request.auth.uid == userId && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || 
+          resource.data.role == request.resource.data.role
+        ))
+      );
+      
+      allow delete: if isSignedIn() && isAdmin();
+    }
+    
+    // ==========================================
+    // 2. PRODUCTS (products)
+    // ==========================================
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        isAdmin() || 
+        (isSupplier() && request.resource.data.supplierId == request.auth.uid)
+      );
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        (isSupplier() && resource.data.supplierId == request.auth.uid)
+      );
+      allow delete: if isSignedIn() && (
+        isAdmin() || 
+        (isSupplier() && resource.data.supplierId == request.auth.uid)
+      );
+    }
+    
+    // ==========================================
+    // 3. ORDER MANAGEMENT (orders)
+    // ==========================================
+    match /orders/{orderId} {
+      // Users can see their own orders, suppliers can see their assigned orders
+      allow read: if isSignedIn() && (
+        resource.data.customerUid == request.auth.uid || 
+        resource.data.customerId == request.auth.uid ||
+        resource.data.supplierId == request.auth.uid ||
+        isAdmin()
+      );
+      
+      // Clients must match their authenticated ID inside placeOrder
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        request.resource.data.customerUid == request.auth.uid
+      );
+      
+      // Allow updates to suppliers (for status tracking), customers, and admin
+      allow update: if isSignedIn() && (
+        resource.data.customerUid == request.auth.uid || 
+        resource.data.customerId == request.auth.uid ||
+        resource.data.supplierId == request.auth.uid ||
+        isAdmin()
+      );
+      
+      allow delete: if isSignedIn() && isAdmin();
+    }
+    
+    // ==========================================
+    // 4. CATEGORIES (categories)
+    // ==========================================
+    match /categories/{categoryId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isAdmin();
+    }
+    
+    // ==========================================
+    // 5. NOTIFICATIONS (notifications)
+    // ==========================================
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && (
+        resource.data.recipientId == request.auth.uid || 
+        resource.data.userId == request.auth.uid || 
+        resource.data.target == 'all' ||
+        isAdmin()
+      );
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        resource.data.recipientId == request.auth.uid || 
+        isAdmin()
+      );
+      allow delete: if isSignedIn() && (
+        resource.data.recipientId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+
+    // ==========================================
+    // 6. CUSTOMER REVIEWS (reviews)
+    // ==========================================
+    match /reviews/{reviewId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
+      allow update, delete: if isSignedIn() && (
+        resource.data.customerId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+
+    // ==========================================
+    // 7. AFTER-SALES SERVICE (sav_requests)
+    // ==========================================
+    match /sav_requests/{requestId} {
+      allow read: if isSignedIn() && (
+        resource.data.customerUid == request.auth.uid || 
+        isSupplier() || 
+        isAdmin()
+      );
+      allow create: if isSignedIn() && request.resource.data.customerUid == request.auth.uid;
+      allow update: if isSignedIn() && (
+        resource.data.customerUid == request.auth.uid || 
+        isSupplier() || 
+        isAdmin()
+      );
+      allow delete: if isSignedIn() && isAdmin();
+    }
+
+    // ==========================================
+    // 8. GEOGRAPHIC DELIVERY ZONES (zones)
+    // ==========================================
+    match /zones/{zoneId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isAdmin();
+    }
+
+    // ==========================================
+    // 9. REGISTERED SUPPLIERS (suppliers)
+    // ==========================================
+    match /suppliers/{supplierId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (isAdmin() || request.resource.data.ownerUid == request.auth.uid);
+      allow update, delete: if isSignedIn() && (isAdmin() || resource.data.ownerUid == request.auth.uid);
+    }
+
+    // ==========================================
+    // 10. SYSTEM CONFIGS (system)
+    // ==========================================
+    match /system/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ==========================================
+    // 11. CATALOG & INVENTORY ADMIN OVERRIDES
+    // ==========================================
+    match /catalog/{document=**} {
+      allow read, write: if isSignedIn() && isAdmin();
+    }
+    match /inventory/{document=**} {
+      allow read, write: if isSignedIn() && isAdmin();
+    }
+  }
+}
